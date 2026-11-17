@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Animation</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #03030b;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="galaxyCanvas" width="780" height="480"></canvas>
+
+    <script>
+        const canvas = document.getElementById('galaxyCanvas');
+        const ctx = canvas.getContext('2d');
+        const TILT = 0.45;
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+
+        // 固定隨機種子 (對應原本的 random.seed(7))
+        let seed = 7;
+        function random() {
+            let x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        }
+        function randInt(min, max) {
+            return Math.floor(random() * (max - min + 1)) + min;
+        }
+        function randUniform(min, max) {
+            return random() * (max - min) + min;
+        }
+        function randGauss(mean, std) {
+            let u = 0, v = 0;
+            while (u === 0) u = random();
+            while (v === 0) v = random();
+            let num = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+            return num * std + mean;
+        }
+
+        // HSV 轉 RGB (對應 glow 函式)
+        function glow(h, v = 1.0) {
+            h = ((h % 1) + 1) % 1;
+            let s = 0.7;
+            let i = Math.floor(h * 6);
+            let f = h * 6 - i;
+            let p = v * (1 - s);
+            let q = v * (1 - f * s);
+            let t = v * (1 - (1 - f) * s);
+            let r, g, b;
+            switch (i % 6) {
+                case 0: r = v; g = t; b = p; break;
+                case 1: r = q; g = v; b = p; break;
+                case 2: r = p; g = v; b = t; break;
+                case 3: r = p; g = q; b = v; break;
+                case 4: r = t; g = p; b = v; break;
+                case 5: r = v; g = p; b = q; break;
+            }
+            return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+        }
+
+        // 座標傾斜轉換 (對應 place 函式)
+        function place(x, y) {
+            y *= 0.55;
+            let c = Math.cos(TILT), s = Math.sin(TILT);
+            return {
+                x: centerX + (x * c - y * s),
+                y: centerY - (y * c + x * s)
+            };
+        }
+
+        // 預先計算所有要畫的星星佇列，實現逐漸浮現效果
+        const drawQueue = [];
+
+        // 1. 背景星星
+        for (let i = 0; i < 140; i++) {
+            drawQueue.push({
+                x: centerX + randInt(-385, 385),
+                y: centerY + randInt(-235, 235),
+                size: randInt(2, 4),
+                color: glow(0.7, 0.3)
+            });
+        }
+
+        // 2. 星塵
+        for (let i = 0; i < 300; i++) {
+            let r = randGauss(0, 120);
+            let a = randUniform(0, Math.PI * 2);
+            let pos = place(r * Math.cos(a), r * Math.sin(a));
+            drawQueue.push({ x: pos.x, y: pos.y, size: randInt(2, 4), color: glow(0.1, 0.25) });
+        }
+
+        // 3. 四條旋臂
+        const count = 900;
+        for (let i = 0; i < count; i++) {
+            for (let k = 0; k < 4; k++) {
+                let d = i / count;
+                let a = k * Math.PI / 2 + d * 5.5;
+                let r = 10 + d * 290;
+                let s = 8 + d * 22;
+                let x = r * Math.cos(a) + randGauss(0, s);
+                let y = r * Math.sin(a) + randGauss(0, s);
+                let pos = place(x, y);
+                let hue = 0.13 - d * 0.55;
+                let v = randUniform(0.6, 1.0);
+                drawQueue.push({ x: pos.x, y: pos.y, size: randInt(2, 4), color: glow(hue, v) });
+            }
+        }
+
+        // 4. 核心
+        for (let i = 0; i < 260; i++) {
+            let r = randGauss(0, 26);
+            let a = randUniform(0, Math.PI * 2);
+            let pos = place(r * Math.cos(a), r * Math.sin(a));
+            drawQueue.push({ x: pos.x, y: pos.y, size: randInt(2, 5), color: glow(0.12) });
+        }
+
+        // 5. 閃亮星點
+        for (let i = 0; i < 40; i++) {
+            let r = randGauss(0, 150);
+            let a = randUniform(0, Math.PI * 2);
+            let pos = place(r * Math.cos(a), r * Math.sin(a));
+            drawQueue.push({ x: pos.x, y: pos.y, size: randInt(5, 8), color: "white" });
+        }
+
+        // 6. 中心亮點
+        drawQueue.push({ x: centerX, y: centerY, size: 26, color: "#fff3c4" });
+
+        // 動畫迴圈：每幀畫 5 個點（對應 tracer(5, 0)）
+        let currentIndex = 0;
+        function animate() {
+            const batchSize = 5;
+            for (let i = 0; i < batchSize && currentIndex < drawQueue.length; i++, currentIndex++) {
+                const dot = drawQueue[currentIndex];
+                ctx.beginPath();
+                ctx.arc(dot.x, dot.y, dot.size / 2, 0, Math.PI * 2);
+                ctx.fillStyle = dot.color;
+                ctx.fill();
+            }
+            if (currentIndex < drawQueue.length) {
+                requestAnimationFrame(animate);
+            }
+        }
+
+        animate();
+    </script>
+</body>
+</html>
